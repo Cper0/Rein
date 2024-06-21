@@ -1,0 +1,8 @@
+services:
+ xfce:
+  image: "accetto/ubuntu-vnc-xfce"
+  ports:
+   - "5900:5901"
+   - "6900:6901"
+  environment:
+   VNC_RESOLUTION: "1360x768"
