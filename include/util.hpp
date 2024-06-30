@@ -6,7 +6,7 @@
 namespace util
 {
 	double sigmoid(double x);
-	arma::vec sigmoid(arma::vec x);
+	arma::mat sigmoid(arma::mat x);
 
 	arma::vec softmax(arma::vec x);
 

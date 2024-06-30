@@ -32,14 +32,17 @@ arma::mat Affine::forward(arma::mat x)
 	}
 
 	in = x;
-	return W * x + b;
+
+	arma::mat out = W * x + b;
+	std::cout << out.has_inf() << std::endl;
+	return out;
 }
 
 arma::mat Affine::backward(arma::mat dy)
 {
 	const arma::vec dx = W.t() * dy;
 	dW = dy * in.t();
-	db = arma::accu(dy) / dy.n_elem;
+	db = arma::accu(dy);
 
 	/*
 	W += opt_W.optimize(dW);

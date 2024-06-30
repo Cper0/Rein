@@ -1,178 +1,153 @@
 #include<rfb/rfbclient.h>
-#include<opencv2/opencv.hpp>
+
 #include<iostream>
 #include<random>
-#include"mnist.hpp"
+#include<armadillo>
+#include<opencv2/opencv.hpp>
+#include<opencv2/highgui.hpp>
+
 #include"monitor.hpp"
+
+#include"mnist.hpp"
 #include"layers.hpp"
-#include"optimizer.hpp"
+#include"conv.hpp"
+#include"backconv.hpp"
+#include"rectifier.hpp"
+#include"normalizer.hpp"
+#include"simerror.hpp"
+#include"dropout.hpp"
 
-constexpr int TRIES = 10000;
+std::vector<LayerBase*> encoder = {
+	new Convolution({28, 28}, {5, 5}, 2, 2),
+	new Relu(0),
 
-std::vector<int> table(TRIES);
+	new Convolution({14, 14}, {5, 5}, 2, 2),
+	new Relu(0),
 
-Mnist mnist(
-	"mnist/train-images-idx3-ubyte",
-	"mnist/train-labels-idx1-ubyte",
-	"mnist/t10k-images-idx3-ubyte",
-	"mnist/t10k-labels-idx1-ubyte"
-);
+	new Flatten(7, 7),
 
-std::vector<LayerBase*> layers = {
-	new Affine(28 * 28, 50),
-	new Relu(50),
+	new Affine(7 * 7, 24),
+	new Relu(0),
 
-	new Affine(50, 10)
+	new Affine(24, 12),
+	new Relu(0),
+
+	new Affine(12, 2),
 };
 
-SoftmaxWithLoss last(10);
+std::vector<LayerBase*> decoder = {
+	new Affine(2, 12),
+	new Relu(0),
 
-int correct = 0;
+	new Affine(12, 24),
+	new Relu(0),
 
-arma::vec num2onehot(uint8_t n)
+	new Affine(24, 49),
+	new Relu(0),
+
+	new Rectifier(7 * 7, {7, 7}),
+
+	new BackConvolution({7, 7}, {5, 5}, 2, 11),
+	new Relu(0),
+
+	new BackConvolution({14, 14}, {5, 5}, 2, 21),
+	new Sigmoid(0),
+};
+
+SimError simerror({28, 28});
+
+std::pair<double,double> encode(arma::mat img)
 {
-	arma::vec out(10, arma::fill::zeros);
-	for(size_t i = 0; i < 10; i++) out[i] = (i == n) ? 1 : 0;
-	return out;
-}
-
-double predict(arma::vec x, arma::vec t)
-{
-	for(auto&& e : layers)
+	arma::mat x = img;
+	for(size_t i = 0; i < encoder.size(); i++)
 	{
-		x = e->forward(x);
-	}
-	const auto e = last.forward(x, t);
-
-	return e;
-}
-
-void backprop()
-{
-	arma::vec dx = last.backward(1.0);
-	for(auto it = layers.rbegin(); it != layers.rend(); it++)
-	{
-		dx = (*it)->backward(dx);
-	}
-
-	((Affine*)layers[0])->optimize();
-	((Affine*)layers[2])->optimize();
-}
-
-void test()
-{
-	int correctness = 0;
-	for(auto it = table.begin(); it != table.end(); it++)
-	{
-		arma::mat img;
-		const auto label = mnist.get_test_sample(*it, img);
-		
-		const arma::vec t = num2onehot(label);
-		arma::vec x = arma::vectorise(img);
-
-		for(auto&& e : layers) x = e->forward(x);
-
-		const uint8_t index = arma::index_max(x);
-		if(index == label)
-		{
-			correctness++;
-		}
+		x = encoder[i]->forward(x);
 	}
 
-	std::cout << "correctness:" << correctness * 100 / table.size() << "%" << std::endl;
+	return std::make_pair(x[0], x[1]);
 }
 
-arma::mat gradient(arma::vec x, arma::vec t)
+arma::mat decode(std::pair<double,double> pos)
 {
-	arma::vec dx = last.backward(1.0);
-	for(auto it = layers.rbegin(); it != layers.rend(); it++)
+	arma::mat x = arma::vec{pos.first, pos.second};
+	for(size_t i = 0; i < decoder.size(); i++)
 	{
-		dx = (*it)->backward(dx);
+		x = decoder[i]->forward(x);
 	}
 
-	return ((Affine*)layers[2])->getdW();
+	return x;
 }
 
-arma::mat numerical_gradient(arma::vec x, arma::vec t)
-{
-	constexpr double EPS = 0.001;
-
-	arma::mat& W = ((Affine*)layers[2])->getW();
-
-	const int width = W.n_cols;
-	const int height = W.n_rows;
-
-	arma::mat out(height, width);
-
-	for(int i = 0; i < height; i++)
-	{
-		for(int j = 0; j < width; j++)
-		{
-			const double pre = predict(x, t);
-			W(i,j) += EPS;
-			const double post = predict(x, t);
-			W(i,j) -= EPS;
-
-			out(i,j) = (post - pre) / EPS;	
-		}
-	}
-
-	return out;
-}
-
-void check_gradient()
-{
-	arma::mat img;
-	const auto label = mnist.get_train_sample(0, img);
-	
-	const arma::vec x = arma::vectorise(img);
-	const arma::vec t = num2onehot(label);
-
-	predict(x,t);
-	const auto bp_W = gradient(x, t);
-	const auto nm_W = numerical_gradient(x, t);
-
-	const auto e = arma::accu(arma::abs(bp_W - nm_W)) / bp_W.n_elem;
-	std::cout << "e:" << e << std::endl;
-
-}
 
 int main(int argc, char** argv)
 {
-
 	std::random_device dev;
 	std::default_random_engine engine(dev());
 
-	arma::arma_rng::set_seed_random();
+	Mnist mnist(
+		"mnist/train-images-idx3-ubyte",
+		"mnist/train-labels-idx1-ubyte",
+		"mnist/t10k-images-idx3-ubyte",
+		"mnist/t10k-labels-idx1-ubyte"
+	);
 
-	for(int i = 0; i < TRIES; i++) table[i] = i;
-	std::shuffle(table.begin(), table.end(), engine);
-
-	for(auto it = table.begin(); it != table.end(); it++)
+	for(int i = 0; i < 60000; i++)
 	{
 		arma::mat img;
-		const auto label = mnist.get_train_sample(*it, img);
+		mnist.get_train_sample(0, img);
 		
-		const arma::vec x = arma::vectorise(img);
-		const arma::vec t = num2onehot(label);
+		const auto pos = encode(img);
+		const auto out = decode(pos);
+		const double err = simerror.forward(out, img);
 
-		const double err = predict(x, t);
-		backprop();
+		std::cout << "[" << i << "] (" << pos.first << "," << pos.second << "),error=" << err << std::endl;
 
-		//std::cout << err << "," << std::endl;
+		arma::mat dout = simerror.backward(1);
+		for(auto it = decoder.rbegin(); it != decoder.rend(); it++)
+		{
+			dout = (*it)->backward(dout);
+			//std::cout << dout << std::endl;
+		}
+		for(auto it = encoder.rbegin(); it != encoder.rend(); it++)
+		{
+			dout = (*it)->backward(dout);
+			//std::cout << dout << std::endl;
+		}
+
+		for(auto&& e : encoder) e->optimize();
+		for(auto&& e : decoder) e->optimize();
+
+		if(out.has_nan())
+		{
+			std::cout << i << std::endl;
+			break;
+		}
+
+		//std::cout << out << std::endl;
 	}
 
-	test();
+	/*
+	std::uniform_real_distribution<> dist(-10, 10);
+	for(;;)
+	{
+		std::pair<double,double> pos = {dist(engine), dist(engine)};
+		const auto out = decode(pos);
 
-	//check_gradient();
-
+		std::vector<double> buffer = arma::conv_to<std::vector<double>>::from(arma::vectorise(out));
+		
+		cv::Mat viewer(28, 28, CV_64FC1, &buffer);
+		cv::Mat dst;
+		cv::resize(viewer, dst, cv::Size(), 10, 10, cv::INTER_NEAREST);
+		std::cout << out << std::endl;
+		
+		cv::imshow("window", dst);
+		cv::waitKey(0);
+	}
 
 
 
 	const std::string host = "localhost";
 	const int port = 5900;
-
-	std::uniform_real_distribution<> dist(0, 1);
 
 	Monitor monitor(host, port);
 	while(monitor.recieve())
@@ -184,6 +159,7 @@ int main(int argc, char** argv)
 	}
 
 	monitor.close();
+	*/
 
 
 

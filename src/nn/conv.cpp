@@ -1,72 +1,85 @@
-#include"layers.hpp"
+#include"conv.hpp"
+#include"optimizer.hpp"
 
-Convolution::Convolution(size_t input_x, size_t input_y, size_t kernel_x, size_t kernel_y)
+Convolution::Convolution(Size img_size, Size kernel_size, size_t st, size_t pad) : LayerBase()
 {
-	input_cols = input_x;
-	input_rows = input_y;
+	img_cols = img_size.cols;
+	img_rows = img_size.rows;
 
-	kernel = arma::mat(kernel_y, kernel_x, arma::fill::randu);
-	kernel_cols = kernel_x;
-	kernel_rows = kernel_y;
+	W = arma::mat(kernel_size.rows, kernel_size.cols, arma::fill::randu) * 0.01;
+	b = 0;
+
+	W_opt = Optimizer();
+	b_opt = Optimizer();
+
+	stride = st;
+	padding = pad;
 }
 
 arma::mat Convolution::forward(arma::mat x)
 {
-	if(x.n_rows != input_rows || x.n_cols != input_cols)
+	if(x.n_rows != img_rows || x.n_cols != img_cols)
 	{
 		throw std::logic_error("");
 	}
 
-	const size_t walk_width = x.n_cols - kernel_cols + 1;
-	const size_t walk_height = x.n_rows - kernel_rows + 1;
+	arma::mat img(arma::size(x) + 2 * padding, arma::fill::zeros);
+	img.submat(padding, padding, padding + x.n_rows - 1, padding + x.n_cols - 1) = x;
 
-	col = im2mat(x);
-	col_W = arma::vectorise(kernel, 1);
+	arma::vec kernel = arma::vectorise(W);
+	in_col = im2mat(img);
 
-	arma::mat out = col_W * col + b;
-	out.reshape(walk_height, walk_width);
+	const auto out_size = (arma::size(x)  + 2 * padding - arma::size(W) + 1) / stride;
+
+	arma::mat out = in_col * kernel + b;
+	out.reshape(out_size);
 	out = out.t();
+
+	std::cout << out.has_inf() << std::endl;
 
 	return out;
 }
 
 arma::mat Convolution::backward(arma::mat dy)
 {
-	dy = arma::vectorise(dy, 1);
+	arma::vec dout = arma::vectorise(dy);
+	arma::vec kernel = arma::vectorise(W);
 
-	//derivate fitler
-	const double db = arma::accu(dy);
-
-	arma::mat dW = col * dy;
-	dW.reshape(kernel_rows, kernel_cols);
+	dW = in_col.t() * dout;
+	dW.reshape(arma::size(W));
 	dW = dW.t();
 
-	arma::mat dcol = dy * col_W.t();
-	arma::mat dx = mat2im(dcol);
+	db = arma::accu(dy);
 
-	return dx;
+	arma::mat dcol = dout * kernel.t();
+	arma::mat dimg = mat2im(dcol);
+
+	return dimg;
+}
+
+void Convolution::optimize()
+{
+	W += W_opt.optimize(dW);
+	b += b_opt.optimize(db);
 }
 
 arma::mat Convolution::im2mat(arma::mat img)
 {
-	const size_t walk_width = img.n_cols - kernel_cols + 1;
-	const size_t walk_height = img.n_rows - kernel_rows + 1;
+	const auto s = (arma::size(img) - arma::size(W) + 1) / stride;
 
-	arma::mat M(kernel.n_elem, walk_width * walk_height);
+	arma::mat M(s[0] * s[1], W.n_elem);
 
-	for(size_t i = 0; i < walk_height; i++)
+	for(size_t i = 0; i < s.n_rows; i++)
 	{
-		for(size_t j = 0; j < walk_width; j++)
+		for(size_t j = 0; j < s.n_cols; j++)
 		{
-			for(size_t k = i; k < i + kernel_rows; k++)
-			{
-				for(size_t l = j; l < j + kernel_cols; l++)
-				{
-					const auto fy = k - i;
-					const auto fx = l - j;
-					M(fy * kernel_cols + fx, i * walk_width + j) = img(k, l);
-				}
-			}
+			const size_t y = i * stride;
+			const size_t x = j * stride;
+
+			arma::mat sub = img.submat(y, x, y + W.n_rows - 1, x + W.n_cols - 1);
+			arma::vec block = arma::vectorise(sub);
+			
+			M.row(i * s[1] + j) = block.t();
 		}
 	}
 
@@ -78,28 +91,24 @@ arma::mat Convolution::mat2im(arma::mat col)
 	/*
 	 * col = (out_size, kernel_size)
 	*/
+	const auto s = (arma::size(img_rows, img_cols) + 2 * padding - arma::size(W) + 1) / stride;
 
-	const size_t walk_width = input_cols - kernel_cols + 1;
-	const size_t walk_height = input_rows - kernel_rows + 1;
-
-	arma::mat img(input_rows, input_cols);
-	for(size_t i = 0; i < input_rows; i++)
+	arma::mat img(img_rows + 2 * padding, img_cols + 2 * padding);
+	for(size_t i = 0; i < s.n_rows; i++)
 	{
-		for(size_t j = 0; j < input_cols; j++)
+		for(size_t j = 0; j < s.n_cols; j++)
 		{
-			for(size_t y = 0; y < walk_height; y++)
-			{
-				for(size_t x = 0; x < walk_width; x++)
-				{
-					img(y + i, x + j) += col(y * walk_width + x, i * input_cols + j);
-				}
-			}
+			const size_t y = i * stride;
+			const size_t x = j * stride;
+
+			arma::mat filter = col.row(i * s.n_cols + j);
+			filter.reshape(arma::size(W));
+			filter = filter.t();
+
+			img.submat(y, x, y + W.n_rows - 1, x + W.n_cols - 1) += filter;
 		}
 	}
 
-	return img;
-
-
-
+	return img.submat(padding, padding, padding + img_rows - 1, padding + img_cols - 1);
 }
 

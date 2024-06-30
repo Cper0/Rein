@@ -3,17 +3,10 @@
 #include<armadillo>
 #include<sstream>
 #include"util.hpp"
+#include"conv.hpp"
+#include"backconv.hpp"
 #include"optimizer.hpp"
 
-class LayerBase
-{
-public:
-	LayerBase();
-	virtual ~LayerBase();
-
-	virtual arma::mat forward(arma::mat x);
-	virtual arma::mat backward(arma::mat x);
-};
 
 class Relu : public LayerBase
 {
@@ -25,7 +18,7 @@ public:
 
 private:
 	size_t input_size;
-	arma::vec mask;
+	arma::mat mask;
 };
 
 class Sigmoid : public LayerBase
@@ -38,7 +31,7 @@ public:
 
 private:
 	size_t input_size;
-	arma::vec out;
+	arma::mat out;
 };
 
 class Affine : public LayerBase
@@ -49,7 +42,7 @@ public:
 
 	arma::mat forward(arma::mat x) override;
 	arma::mat backward(arma::mat dy) override;
-	void optimize();
+	void optimize() override;
 
 	arma::mat& getW() { return W; }
 	const arma::mat& getdW() { return dW; }
@@ -69,6 +62,19 @@ private:
 	Optimizer* opt;
 	Optimizer opt_W;
 	Optimizer opt_b;
+};
+
+class Flatten : public LayerBase
+{
+public:
+	Flatten(size_t in_rows, size_t in_cols);
+
+	arma::mat forward(arma::mat x) override;
+	arma::mat backward(arma::mat x) override;
+
+private:
+	size_t input_rows;
+	size_t input_cols;
 };
 
 class SME
@@ -99,27 +105,3 @@ private:
 	arma::vec y;
 };
 
-class Convolution
-{
-public:
-	Convolution(size_t, size_t, size_t, size_t);
-
-	arma::mat forward(arma::mat x);
-
-	arma::mat backward(arma::mat dy);
-
-private:
-	arma::mat im2mat(arma::mat img);
-	arma::mat mat2im(arma::mat mat);
-			
-	arma::mat kernel;
-	size_t kernel_rows;
-	size_t kernel_cols;
-	double b;
-
-	size_t input_rows;
-	size_t input_cols;
-
-	arma::mat col;
-	arma::rowvec col_W;
-};

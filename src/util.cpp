@@ -10,7 +10,7 @@ namespace util
 		return 1.0 / (1.0 + std::exp(-x));
 	}
 
-	arma::vec sigmoid(arma::vec x)
+	arma::mat sigmoid(arma::mat x)
 	{
 		return 1.0 / (1.0 + arma::exp(-x));
 	}
