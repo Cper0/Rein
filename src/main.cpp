@@ -1,165 +1,137 @@
 #include<rfb/rfbclient.h>
 
 #include<iostream>
+#include<cassert>
 #include<random>
 #include<armadillo>
 #include<opencv2/opencv.hpp>
 #include<opencv2/highgui.hpp>
+#include<torch/torch.h>
+
 
 #include"monitor.hpp"
+#include"autoencoder.hpp"
+#include"agent.hpp"
+#include"teacher.hpp"
 
-#include"mnist.hpp"
-#include"layers.hpp"
-#include"conv.hpp"
-#include"backconv.hpp"
-#include"rectifier.hpp"
-#include"normalizer.hpp"
-#include"simerror.hpp"
-#include"dropout.hpp"
+torch::Tensor matToTensor(cv::Mat input) {
+	cv::Mat mat;
+	input.convertTo(mat, CV_64FC3);
 
-std::vector<LayerBase*> encoder = {
-	new Convolution({28, 28}, {5, 5}, 2, 2),
-	new Relu(0),
+    torch::Tensor tensor;
+    if (mat.type() == CV_64FC3) {
+        tensor = torch::from_blob(mat.data, {mat.rows, mat.cols, 3}, torch::kFloat);
+    } else {
+        throw std::runtime_error("Unsupported cv::Mat type");
+    }
 
-	new Convolution({14, 14}, {5, 5}, 2, 2),
-	new Relu(0),
+    tensor = tensor.permute({2, 0, 1});
 
-	new Flatten(7, 7),
-
-	new Affine(7 * 7, 24),
-	new Relu(0),
-
-	new Affine(24, 12),
-	new Relu(0),
-
-	new Affine(12, 2),
-};
-
-std::vector<LayerBase*> decoder = {
-	new Affine(2, 12),
-	new Relu(0),
-
-	new Affine(12, 24),
-	new Relu(0),
-
-	new Affine(24, 49),
-	new Relu(0),
-
-	new Rectifier(7 * 7, {7, 7}),
-
-	new BackConvolution({7, 7}, {5, 5}, 2, 11),
-	new Relu(0),
-
-	new BackConvolution({14, 14}, {5, 5}, 2, 21),
-	new Sigmoid(0),
-};
-
-SimError simerror({28, 28});
-
-std::pair<double,double> encode(arma::mat img)
-{
-	arma::mat x = img;
-	for(size_t i = 0; i < encoder.size(); i++)
-	{
-		x = encoder[i]->forward(x);
-	}
-
-	return std::make_pair(x[0], x[1]);
+    return tensor.clone(); // 安全のためクローンを返す
 }
 
-arma::mat decode(std::pair<double,double> pos)
+cv::Mat tensorToMat(torch::Tensor t)
 {
-	arma::mat x = arma::vec{pos.first, pos.second};
-	for(size_t i = 0; i < decoder.size(); i++)
-	{
-		x = decoder[i]->forward(x);
-	}
+	const auto quant = t.mul(255).clamp(0, 255).to(torch::kU8);
 
-	return x;
+	const int rows = t.size(1);
+	const int cols = t.size(2);
+	const int channels= t.size(0);
+
+	const auto arranged = quant.permute({1, 2, 0});
+	const cv::Mat out(cv::Size(rows, cols), CV_8UC3, arranged.data_ptr());
+	return out;
 }
 
+cv::Mat get_screen_mat(Monitor& monitor)
+{
+	std::vector<unsigned char> buffer(monitor.width() * monitor.height() * 4);
+	std::memcpy(buffer.data(), monitor.frame_buffer(), buffer.size());
+	cv::Mat screen(monitor.height(), monitor.width(), CV_8UC4, buffer.data());
+
+	cv::Mat compressed;
+	cv::resize(screen, compressed, cv::Size(512, 512), cv::INTER_LINEAR);
+
+	cv::Mat without_alpha;
+	cv::cvtColor(compressed, without_alpha, cv::COLOR_BGRA2BGR);
+
+	return without_alpha;
+}
 
 int main(int argc, char** argv)
 {
-	std::random_device dev;
-	std::default_random_engine engine(dev());
-
-	Mnist mnist(
-		"mnist/train-images-idx3-ubyte",
-		"mnist/train-labels-idx1-ubyte",
-		"mnist/t10k-images-idx3-ubyte",
-		"mnist/t10k-labels-idx1-ubyte"
-	);
-
-	for(int i = 0; i < 60000; i++)
-	{
-		arma::mat img;
-		mnist.get_train_sample(0, img);
-		
-		const auto pos = encode(img);
-		const auto out = decode(pos);
-		const double err = simerror.forward(out, img);
-
-		std::cout << "[" << i << "] (" << pos.first << "," << pos.second << "),error=" << err << std::endl;
-
-		arma::mat dout = simerror.backward(1);
-		for(auto it = decoder.rbegin(); it != decoder.rend(); it++)
-		{
-			dout = (*it)->backward(dout);
-			//std::cout << dout << std::endl;
-		}
-		for(auto it = encoder.rbegin(); it != encoder.rend(); it++)
-		{
-			dout = (*it)->backward(dout);
-			//std::cout << dout << std::endl;
-		}
-
-		for(auto&& e : encoder) e->optimize();
-		for(auto&& e : decoder) e->optimize();
-
-		if(out.has_nan())
-		{
-			std::cout << i << std::endl;
-			break;
-		}
-
-		//std::cout << out << std::endl;
-	}
-
-	/*
-	std::uniform_real_distribution<> dist(-10, 10);
-	for(;;)
-	{
-		std::pair<double,double> pos = {dist(engine), dist(engine)};
-		const auto out = decode(pos);
-
-		std::vector<double> buffer = arma::conv_to<std::vector<double>>::from(arma::vectorise(out));
-		
-		cv::Mat viewer(28, 28, CV_64FC1, &buffer);
-		cv::Mat dst;
-		cv::resize(viewer, dst, cv::Size(), 10, 10, cv::INTER_NEAREST);
-		std::cout << out << std::endl;
-		
-		cv::imshow("window", dst);
-		cv::waitKey(0);
-	}
+	torch::manual_seed(1);
 
 
+	cv::namedWindow("window");
 
-	const std::string host = "localhost";
-	const int port = 5900;
+	constexpr int EXPLORING_TIMES = 1000;
 
-	Monitor monitor(host, port);
+	int times = 0;
+
+	Teacher teacher = Teacher();
+	Agent agent(0.1);
+
+	torch::Tensor history = torch::zeros({EXPLORING_TIMES, 3, 512, 512});
+
+	Monitor monitor("localhost", 5900);
 	while(monitor.recieve())
 	{
-		const float mx = std::round(dist(engine)) * 10 - 5;
-		const float my = std::round(dist(engine)) * 10 - 5;
-		monitor.control(mx, my, dist(engine) >= 0.5, dist(engine) >= 0.5);
+		if(times == EXPLORING_TIMES)
+		{
+			teacher.learn(history);
+			times = 0;
+			continue;
+		}
 
+		const AgentAction act = agent.select();
+
+		switch(act)
+		{
+			case AGENT_MOUSE_LEFT:
+				monitor.control(-10, 0, false, false);
+				break;
+			case AGENT_MOUSE_RIGHT:
+				monitor.control(10, 0, false, false);
+				break;
+			case AGENT_MOUSE_UP:
+				monitor.control(0, -10, false, false);
+				break;
+			case AGENT_MOUSE_DOWN:
+				monitor.control(0, 10, false, false);
+				break;
+			case AGENT_BUTTON_LEFT:
+				monitor.control(0, 0, true, false);
+				break;
+			case AGENT_BUTTON_RIGHT:
+				monitor.control(0, 0, false, true);
+				break;
+			default:
+				break;
+		}
+
+		cv::Mat img = get_screen_mat(monitor);
+
+		torch::Tensor screen = matToTensor(img);
+
+		history.index({times}) = screen;
+
+
+		const double reward = teacher.eval(screen);
+		agent.update(act, reward);
+
+		std::cout << "reward:" << reward << std::endl;
+
+		times++;
+
+		cv::Mat view;
+		cv::cvtColor(img, view, cv::COLOR_BGR2BGRA);
+		
+		cv::imshow("window", view);
+		cv::waitKey(1);
 	}
 
 	monitor.close();
-	*/
 
 
 
