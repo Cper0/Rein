@@ -1,33 +1,21 @@
 #pragma once
 
 #include<vector>
-#include<random>
-#include<algorithm>
+#include"keyboard.hpp"
 
-enum AgentAction
+struct Action
 {
-	AGENT_MOUSE_LEFT,
-	AGENT_MOUSE_RIGHT,
-	AGENT_MOUSE_UP,
-	AGENT_MOUSE_DOWN,
-	AGENT_BUTTON_LEFT,
-	AGENT_BUTTON_RIGHT,
-	AGENT_ACTIONS
+	float x, y;
+	bool left, right;
+	bool keys[KEY106_TOTAL];
 };
 
 class Agent
 {
 public:
-	Agent(double eps);
+	
 
-	AgentAction select();
-	void update(AgentAction act, double reward);
-
-private:
-	std::default_random_engine engine;
-
-	double epsilon;
-
-	std::vector<double> table;
-	std::vector<int> count;
+	void generate_image(std::vector<unsigned char>& buffer);
+	void act(const std::vector<unsigned char>& buffer, Action& action);
+	
 };

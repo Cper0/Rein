@@ -1,13 +1,16 @@
 #include"monitor.hpp"
 
-Monitor::Monitor(const std::string& host, int port, const std::string& pass) : keystack(), keymap()
+Monitor::Monitor(const std::string& host, int port) : keystack(), keymap()
 {
 	constexpr int RESOLUTION_WIDTH = 1360;
 	constexpr int RESOLUTION_HEIGHT = 768;
 
-	pwd = pass;
+	buffer = std::vector<unsigned char>(RESOLUTION_WIDTH * RESOLUTION_HEIGHT * 4);
 
 	cl = rfbGetClient(8, 3 ,4);
+	cl->width = RESOLUTION_WIDTH;
+	cl->height = RESOLUTION_HEIGHT;
+	cl->frameBuffer = buffer.data();
 	cl->format.depth = 24;
 	cl->format.bitsPerPixel = 32;
 	cl->format.redShift = 16;
@@ -21,9 +24,8 @@ Monitor::Monitor(const std::string& host, int port, const std::string& pass) : k
 	cl->appData.encodingsString = "tight ultra";
 	cl->serverHost = strdup(host.c_str());
 	cl->serverPort = port;
-	cl->GetPassword = get_password_callback;
 
-	rfbClientSetClientData(cl, nullptr, this);
+	//rfbClientSetClientData(cl, nullptr, this);
 
 	pointer_x = pointer_y = 100;
 	mouse_r = mouse_l = false;
@@ -32,12 +34,6 @@ Monitor::Monitor(const std::string& host, int port, const std::string& pass) : k
 	{
 		throw std::runtime_error("Error thrown on constructing Monitor");
 	}
-}
-
-char* Monitor::get_password_callback(rfbClient* cl)
-{
-	Monitor* monitor = static_cast<Monitor*>(rfbClientGetClientData(cl, nullptr));
-	return strdup(monitor->password().c_str());
 }
 
 bool Monitor::recieve()
