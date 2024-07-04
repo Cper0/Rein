@@ -21,7 +21,7 @@ public:
 
 	void push_key(Key106 k);
 
-	const unsigned char* frame_buffer() const noexcept { return cl->frameBuffer; }
+	unsigned char* frame_buffer() noexcept { return cl->frameBuffer; }
 	int width() const noexcept { return cl->width; }
 	int height() const noexcept { return cl->height; }
 	const std::string& password() const noexcept { return pwd; }

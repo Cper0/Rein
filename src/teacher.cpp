@@ -11,7 +11,7 @@ double Teacher::eval(torch::Tensor state)
 	auto prediction = model->forward(state);
 	auto loss = torch::mse_loss(prediction, state);
 
-	return 1.0 / loss.item<double>();
+	return std::exp(-loss.item<double>());
 }
 
 void Teacher::learn(torch::Tensor history)
