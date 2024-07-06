@@ -8,6 +8,8 @@ AutoEncoder::AutoEncoder()
 
 torch::Tensor AutoEncoder::forward(torch::Tensor x)
 {
+	encoder->to(torch::kCUDA);
+	decoder->to(torch::kCUDA);
 	x = encoder->forward(x);
 	x = decoder->forward(x);
 	return x;

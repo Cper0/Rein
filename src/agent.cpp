@@ -11,6 +11,8 @@ Agent::Agent(double eps)
 	table = std::vector<double>(AGENT_ACTIONS);
 	count = std::vector<int>(AGENT_ACTIONS);
 
+	index = std::deque<AgentAction>(10, AGENT_ACTIONS);
+
 	std::uniform_int_distribution<> act_gen(0, table.size() - 1);
 	table[act_gen(engine)] = 0.01;
 }
@@ -33,7 +35,25 @@ AgentAction Agent::select()
 
 void Agent::update(AgentAction act, double reward)
 {
-	count[act] += 1;
+	const double penalty = eval_penalty(act);
+	const double feed = reward - penalty;
 
-	table[act] = reward / count[act] + (1.0 - 1.0 / count[act]) * table[act];
+	index.pop_back();
+	index.push_front(act);
+	
+	count[act] += 1;
+	table[act] = feed / count[act] + (1.0 - 1.0 / count[act]) * table[act];
+}
+
+double Agent::eval_penalty(AgentAction sel)
+{
+	double weight = 1;
+	double result = 0;
+	for(auto it = index.begin(); it != index.end(); it++)
+	{
+		if(*it == sel) result += weight;
+		weight /= 2.0;
+	}
+
+	return result;
 }

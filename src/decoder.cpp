@@ -6,12 +6,16 @@ DecoderImpl::DecoderImpl()
 	body = register_module("body", torch::nn::Sequential(
 		torch::nn::Unflatten(torch::nn::UnflattenOptions(1, {64, 64, 64})),
 		torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(64, 64, 3).stride(1).padding(1)),
+		torch::nn::BatchNorm2d(64),
 		torch::nn::LeakyReLU(),
 		torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(64, 64, 4).stride(2).padding(1)),
+		torch::nn::BatchNorm2d(64),
 		torch::nn::LeakyReLU(),
 		torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(64, 32, 4).stride(2).padding(1)),
+		torch::nn::BatchNorm2d(32),
 		torch::nn::LeakyReLU(),
 		torch::nn::ConvTranspose2d(torch::nn::ConvTranspose2dOptions(32, 3, 4).stride(2).padding(1)),
+		torch::nn::BatchNorm2d(3),
 		torch::nn::LeakyReLU(),
 		torch::nn::Sigmoid()
 	));

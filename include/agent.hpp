@@ -3,6 +3,7 @@
 #include<vector>
 #include<random>
 #include<algorithm>
+#include<deque>
 
 enum AgentAction
 {
@@ -24,9 +25,13 @@ public:
 	void update(AgentAction act, double reward);
 
 private:
+	double eval_penalty(AgentAction sel);
+
 	std::default_random_engine engine;
 
 	double epsilon;
+
+	std::deque<AgentAction> index;
 
 	std::vector<double> table;
 	std::vector<int> count;

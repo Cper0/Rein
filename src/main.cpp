@@ -10,47 +10,28 @@
 #include"agent.hpp"
 #include"teacher.hpp"
 
-double eval_penalty(const std::deque<AgentAction>& actions, AgentAction sel, double base_penalty)
-{
-	double weight = 1;
-	double result = 0;
-	for(auto it = actions.begin(); it != actions.end(); it++)
-	{
-		if(*it == sel)
-		{
-			result += base_penalty * weight;
-		}
-
-		weight /= 2.0;
-	}
-
-	return result;
-}
-
-
 
 int main(int argc, char** argv) {
     torch::manual_seed(1);
 
     cv::namedWindow("window");
 
-    constexpr int EXPLORING_TIMES = 20;
+    constexpr int EXPLORING_TIMES = 100;
+	constexpr double AGENT_EPSILON = 0.05;
 
     int times = 0;
 
     Teacher teacher = Teacher();
-    Agent agent(0.1);
+    Agent agent(AGENT_EPSILON);
 
-    torch::Tensor history = torch::zeros({EXPLORING_TIMES, 3, 512, 512});
-
-	std::deque<AgentAction> actions(10, AGENT_ACTIONS);
+	torch::Tensor history = torch::zeros({EXPLORING_TIMES, 3, 512, 512}, torch::Device(torch::kCUDA));
 
 	cv::cuda::GpuMat origin, squared, true_color, norm;
 
     Monitor monitor("localhost", 5900);
     while(monitor.recieve()) {
         if(times == EXPLORING_TIMES) {
-			for(int i = 0; i < EXPLORING_TIMES; i++) teacher.learn(history.index({i}));
+			teacher.learn(history);
             times = 0;
             continue;
         }
@@ -87,21 +68,16 @@ int main(int argc, char** argv) {
 		cv::cuda::cvtColor(squared, true_color, cv::COLOR_BGRA2BGR);
     	true_color.convertTo(norm, CV_64FC3);
 
-		cv::Mat mat;
-		norm.download(mat);
-		torch::Tensor tensor = torch::from_blob(mat.data, {mat.rows, mat.cols, 3}, torch::kFloat);
+		auto options = torch::TensorOptions().dtype(torch::kFloat).device(torch::kCUDA);
+		torch::Tensor tensor = torch::from_blob(norm.data, {norm.rows, norm.cols, 3}, options);
 		tensor = tensor.permute({2, 0, 1});
 
 		history.index({times}) = tensor;
 
         const double reward = teacher.eval(tensor);
-		const double penalty = eval_penalty(actions, act, 0.5);
-        agent.update(act, reward - penalty);
+        agent.update(act, reward);
 
-		actions.erase(actions.end() - 1);
-		actions.push_front(act);
-
-        std::cout << "(" << times << ") reward:" << reward << ",penalty:" << penalty << std::endl;
+        std::cout << "(" << times << ") reward:" << reward << ",act:" << act << std::endl;
 
         times++;
 
