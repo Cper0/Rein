@@ -5,16 +5,7 @@
 #include<algorithm>
 #include<deque>
 
-enum AgentAction
-{
-	AGENT_MOUSE_LEFT,
-	AGENT_MOUSE_RIGHT,
-	AGENT_MOUSE_UP,
-	AGENT_MOUSE_DOWN,
-	AGENT_BUTTON_LEFT,
-	AGENT_BUTTON_RIGHT,
-	AGENT_ACTIONS
-};
+#include"agent_actions.hpp"
 
 class Agent
 {

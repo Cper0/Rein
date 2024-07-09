@@ -14,12 +14,12 @@ add_executable(REIN
 	src/main.cpp
 	src/monitor.cpp
 	src/keymap.cpp
-	src/sampling.cpp
-	src/encoder.cpp
-	src/decoder.cpp
-	src/autoencoder.cpp
 	src/agent.cpp
-	src/teacher.cpp
+
+	src/vae.cpp
+	src/vae_encoder.cpp
+	src/vae_decoder.cpp
+	src/action_encoder.cpp
 )
 
 target_include_directories(REIN PUBLIC

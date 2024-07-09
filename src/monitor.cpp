@@ -40,6 +40,32 @@ char* Monitor::get_password_callback(rfbClient* cl)
 	return strdup(monitor->password().c_str());
 }
 
+torch::Tensor Monitor::frame_to_tensor()
+{
+	static cv::cuda::GpuMat origin, squared, true_color, norm;
+
+	cv::Mat frame(cl->height, cl->width, CV_8UC4, cl->frameBuffer);
+	origin.upload(frame);
+
+
+	cv::cuda::resize(origin, squared, cv::Size(128, 128), 0, 0, cv::INTER_LINEAR);
+	cv::cuda::cvtColor(squared, true_color, cv::COLOR_BGRA2BGR);
+	true_color.convertTo(norm, CV_32FC3, 1.0 / 255.0);
+	//true_color.convertTo(norm, CV_64FC3, 1.0 / 255.0);
+
+	/*
+	cv::Mat local;
+	norm.download(local);
+	std::cout << local << std::endl;
+	*/
+
+	auto options = torch::TensorOptions().dtype(torch::kFloat).device(torch::kCUDA);
+	torch::Tensor tensor = torch::from_blob(norm.data, {norm.rows, norm.cols, 3}, options);
+	tensor = tensor.permute({2, 0, 1});
+
+	return tensor.clone();
+}
+
 bool Monitor::recieve()
 {
 	int i = WaitForMessage(cl, 500);
