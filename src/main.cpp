@@ -11,6 +11,15 @@
 #include"agent.hpp"
 #include"action_encoder.hpp"
 #include"vae.hpp"
+#include"image_holder.hpp"
+
+using namespace torch::indexing;
+
+constexpr int MOVE = 1;
+constexpr int EXPLORING_TIMES = 100;
+constexpr int BATCH_SIZE = 10;
+constexpr int EPOCHS = EXPLORING_TIMES / BATCH_SIZE;
+constexpr double AGENT_EPSILON = 0.05;
 
 torch::Device device(torch::kCUDA);
 
@@ -33,8 +42,8 @@ int main(int argc, char** argv) {
 		lr = std::atof(argv[1]);
 	}
 
-    constexpr int EXPLORING_TIMES = 100;
-	constexpr double AGENT_EPSILON = 0.05;
+	cv::namedWindow("window", cv::WINDOW_AUTOSIZE);
+
 
     int times = 0;
 
@@ -60,16 +69,16 @@ int main(int argc, char** argv) {
         const AgentAction act = agent.select();
         switch(act) {
             case AGENT_MOUSE_LEFT:
-                monitor.control(-10, 0, false, false);
+                monitor.control(-MOVE, 0, false, false);
                 break;
             case AGENT_MOUSE_RIGHT:
-                monitor.control(10, 0, false, false);
+                monitor.control(MOVE, 0, false, false);
                 break;
             case AGENT_MOUSE_UP:
-                monitor.control(0, -10, false, false);
+                monitor.control(0, -MOVE, false, false);
                 break;
             case AGENT_MOUSE_DOWN:
-                monitor.control(0, 10, false, false);
+                monitor.control(0, MOVE, false, false);
                 break;
             case AGENT_BUTTON_LEFT:
                 monitor.control(0, 0, true, false);
@@ -85,17 +94,19 @@ int main(int argc, char** argv) {
 
 		if(times == EXPLORING_TIMES)
 		{
-			{
-				vae->train();
-				vae_optim.zero_grad();
+			vae->train();
+			vae_optim.zero_grad();
 
-				auto trg = screen_history;
-				auto out = vae->forward(trg);
-				auto [mu, log_var] = vae->encoder->forward(trg);
+			for(int i = 0; i < EPOCHS; i++)
+			{
+				auto target = screen_history.index({Slice(i * BATCH_SIZE, i * BATCH_SIZE + BATCH_SIZE)});
+				auto output = vae->forward(target);
+				auto [mu, log_var] = vae->encoder->forward(target);
 				auto z = VAEImpl::reparameterize(mu, log_var);
 
 				auto kld = -0.5 * torch::sum(1.0 + log_var - mu.pow(2) - log_var.exp(), 1);
-				auto mse = torch::mean(torch::pow(out - trg, 2), {1, 2, 3});
+				auto mse = torch::mean(torch::pow(output - target, 2), {1, 2, 3});
+
 				auto loss = 0.04 * kld + mse;
 
 				loss.sum().backward();
@@ -103,26 +114,29 @@ int main(int argc, char** argv) {
 				vae_optim.step();
 			}
 
-			{
-				vae->eval();
-				action_encoder->train();
-				act_optim.zero_grad();
+			vae->eval();
+			action_encoder->train();
+			act_optim.zero_grad();
 
-				auto target = action_history;
-				auto output = vae->decoder->forward(action_encoder->forward(target));
+			for(int i = 0; i < EPOCHS; i++)
+			{
+				auto actions = action_history.index({Slice(i * BATCH_SIZE, (i+1) * BATCH_SIZE)});
+				auto target = screen_history.index({Slice(i*BATCH_SIZE,(i+1)*BATCH_SIZE)});
+
+				auto output = vae->decoder->forward(action_encoder->forward(actions));
 				
-				auto loss = torch::mse_loss(output, screen_history);
+				auto loss = torch::mse_loss(output, target);
 
 				loss.sum().backward();
 				act_optim.step();
-				
 			}
+
 			times = 0;
 			
 			continue;
 		}
 
-		auto screen = monitor.frame_to_tensor();
+		auto [screen, img] = monitor.create_image();
 		screen_history.index({times}) = screen;
 		action_history.index({times}) = onehot_action(act);
 
@@ -143,12 +157,8 @@ int main(int argc, char** argv) {
         times++;
 
 		{
-			/*
-			cv::Mat img;
-			squared.download(img);
 			cv::imshow("window", img);
 			cv::waitKey(1);
-			*/
 		}
     }
 

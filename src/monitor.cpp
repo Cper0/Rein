@@ -40,7 +40,7 @@ char* Monitor::get_password_callback(rfbClient* cl)
 	return strdup(monitor->password().c_str());
 }
 
-torch::Tensor Monitor::frame_to_tensor()
+std::pair<torch::Tensor,cv::Mat> Monitor::create_image()
 {
 	static cv::cuda::GpuMat origin, squared, true_color, norm;
 
@@ -63,7 +63,7 @@ torch::Tensor Monitor::frame_to_tensor()
 	torch::Tensor tensor = torch::from_blob(norm.data, {norm.rows, norm.cols, 3}, options);
 	tensor = tensor.permute({2, 0, 1});
 
-	return tensor.clone();
+	return std::make_pair(tensor.clone(), frame);
 }
 
 bool Monitor::recieve()
@@ -106,6 +106,9 @@ void Monitor::control(float x, float y, bool l, bool r)
 
 	pointer_x += x;
 	pointer_y += y;
+
+	pointer_x = std::clamp(pointer_x, 0, cl->width);
+	pointer_y = std::clamp(pointer_y, 0, cl->height);
 
 	SendPointerEvent(cl, static_cast<int>(pointer_x), static_cast<int>(pointer_y), mask);
 }

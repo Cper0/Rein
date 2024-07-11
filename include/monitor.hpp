@@ -21,7 +21,7 @@ class Monitor
 public:
 	Monitor(const std::string& host, int port, const std::string& pass = "headless");
 
-	torch::Tensor frame_to_tensor();
+	std::pair<torch::Tensor,cv::Mat> create_image();
 
 	bool recieve();
 	void close();
@@ -38,7 +38,7 @@ private:
 	static char* get_password_callback(rfbClient* cl);
 
 	rfbClient* cl;
-	float pointer_x, pointer_y;
+	int pointer_x, pointer_y;
 	bool mouse_l, mouse_r;
 
 	std::string pwd;

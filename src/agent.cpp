@@ -36,7 +36,7 @@ AgentAction Agent::select()
 void Agent::update(AgentAction act, double reward)
 {
 	const double penalty = eval_penalty(act);
-	const double feed = reward - penalty;
+	const double feed = reward - penalty * 0.1;
 
 	index.pop_back();
 	index.push_front(act);

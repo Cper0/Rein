@@ -20,6 +20,8 @@ add_executable(REIN
 	src/vae_encoder.cpp
 	src/vae_decoder.cpp
 	src/action_encoder.cpp
+
+	src/image_holder.cpp
 )
 
 target_include_directories(REIN PUBLIC
